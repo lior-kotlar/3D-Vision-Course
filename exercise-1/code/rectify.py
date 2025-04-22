@@ -125,10 +125,12 @@ def find_affine_rect_matrix(line_points_group1, line_points_group2):
     return affine_rect_matrix
 
 
-def show_image_in_scale(img, scale=0.5, title='just an image right?'):
+def show_image_in_scale(img, scale=0.5, save=False, image_name = 'image'):
     imgcopy = img.copy()
     resized = cv2.resize(imgcopy, None, fx=scale, fy=scale)
-    cv2.imshow(title, resized)
+    if save:
+        cv2.imwrite(f'.\\exercise-1\\data\\rectified\\{image_name}rectified.jpeg', resized)
+    cv2.imshow('title', resized)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
@@ -184,12 +186,13 @@ def metric_rectify(affine_img):
 
 def main():
 
-    image_path = ".\\exercise-1\\data\\notebook and floor.jpeg"
+    image_path = ".\\exercise-1\\data\\floor-and-page.jpeg"
+    image_name = os.path.splitext(os.path.basename(image_path))[0]
     img = cv2.imread(image_path)
     affinely_rectified_image = affinely_rectify(img)
-    show_image_in_scale(affinely_rectified_image)
+    show_image_in_scale(affinely_rectified_image, save=True, image_name=f'{image_name}affinely')
     metricly_rectified_image = metric_rectify(affinely_rectified_image)
-    show_image_in_scale(metricly_rectified_image)
+    show_image_in_scale(metricly_rectified_image, save=True, image_name=f'{image_name}metricly')
 
 
 
