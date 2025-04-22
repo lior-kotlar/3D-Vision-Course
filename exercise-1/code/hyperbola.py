@@ -53,10 +53,12 @@ def check_discriminant(coeffs):
     discriminant = b**2 - 4*a*c
     if discriminant > 0:
         return True
+    else:
+        return False
 
 
 def main():
-    image_path = ".\\exercise-1\\data\\trash2.jpeg"
+    image_path = ".\\exercise-1\\data\\cup-in.jpeg"
     img = cv2.imread(image_path)
     collect_hyperbola_points(img)
     m = create_matrix_from_points()
