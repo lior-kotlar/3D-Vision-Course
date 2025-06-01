@@ -7,6 +7,9 @@ image1_path = 'exercise-2/data/board1.jpeg'
 image2_path = 'exercise-2/data/board2.jpeg'
 point_file_path = 'exercise-2/data/points.npz'
 matching_points_file_path = 'exercise-2/data/matching_points.jpeg'
+NUM_POINTS = 7
+epiploar_lines_file_path = f'exercise-2/data/epiploar_lines_.{NUM_POINTS}points.jpeg'
+
 
 def find_corresponding_points(image1, image2):
     sift = cv2.SIFT_create()
@@ -24,7 +27,7 @@ def find_corresponding_points(image1, image2):
     pts2 = []
 
     for i, (m, n) in enumerate(matches):
-        if m.distance < 0.4 * n.distance:
+        if m.distance < 0.5 * n.distance:
             pts1.append(kp1[m.queryIdx].pt)
             pts2.append(kp2[m.trainIdx].pt)
 
@@ -40,8 +43,8 @@ def draw_keypoints(image1, image2, pts1, pts2):
 
     for ptA, ptB in zip(pts1, pts2):
         color = tuple(np.random.randint(0, 255, 3).tolist())
-        new1_imgA = cv2.circle(new1_imgA, tuple(ptA), 5, color, -1)
-        new1_imgB = cv2.circle(new1_imgB, tuple(ptB), 5, color, -1)
+        new1_imgA = cv2.circle(new1_imgA, tuple(ptA), 10, color, -1)
+        new1_imgB = cv2.circle(new1_imgB, tuple(ptB), 10, color, -1)
 
     f, axis = plt.subplots(1, 2, figsize=(15, 8))
 
@@ -56,12 +59,12 @@ def draw_keypoints(image1, image2, pts1, pts2):
 
     plt.savefig(matching_points_file_path)
 
-def randomSampleCorrPoint(points1, points2, num_point=7):
-    if num_point >= len(points1):
+def randomSampleCorrPoint(points1, points2):
+    if NUM_POINTS >= len(points1):
         return points1, points2
     else:
         rng = np.random.default_rng()
-        point_idx = rng.choice(np.arange(len(points1)), size=num_point, replace=False)
+        point_idx = rng.choice(np.arange(len(points1)), size=NUM_POINTS, replace=False)
         sample_pts1 = points1[point_idx, :]
         sample_pts2 = points2[point_idx, :]
         return sample_pts1, sample_pts2
@@ -89,12 +92,35 @@ def get_normalisation_mat(points):
     )
     return normalisation_mat
 
-def get_fundamental_matrix(pts1, pts2, num_point=7):
+def get_fundamental_matrix_opencv(points1, points2, tol):
+    points1 = np.float64(points1)
+    points2 = np.float64(points2)
+
+    sample_pts1, sample_pts2 = randomSampleCorrPoint(points1, points2)
+
+    algorithm = cv2.FM_7POINT
+    if NUM_POINTS == 8:
+        algorithm = cv2.FM_8POINT
+
+    f_normalized, _ = cv2.findFundamentalMat(sample_pts1, sample_pts2, algorithm)
+
+    best_f = f_normalized
+    if algorithm == cv2.FM_7POINT and f_normalized.shape[0] == 9:
+        f_matrices = []
+        for i in range(0, 9, 3):
+            f_matrices.append(f_normalized[i:i+3])
+        best_f, inlier_map = choose_best_matrix_of3(f_matrices, points1, points2, tol)
+    else:
+        inlier_map = make_inlier_map_1_matrix(points1, points2, best_f, tol)
+    return best_f, inlier_map
+
+
+def get_fundamental_matrix(pts1, pts2):
 
     pts1 = np.float64(pts1)
     pts2 = np.float64(pts2)
 
-    sample_pts1, sample_pts2 = randomSampleCorrPoint(pts1, pts2, num_point)
+    sample_pts1, sample_pts2 = randomSampleCorrPoint(pts1, pts2)
 
     # Get normalise matrix based on the sample points
     normalisation_mat_1 = get_normalisation_mat(pts1)
@@ -106,6 +132,7 @@ def get_fundamental_matrix(pts1, pts2, num_point=7):
     # Normalise data points
     sample_pts1_normal = np.float64([normalisation_mat_1 @ sample_point1 for sample_point1 in sample_pts1])
     sample_pts2_normal = np.float64([normalisation_mat_2 @ sample_point2 for sample_point2 in sample_pts2])
+
 
     # Compute the design matrix
     design_matrix = np.array(
@@ -158,46 +185,68 @@ def get_correspondent_epipolar_lines(points1, points2, fundamental_matrix):
 
     return lines1, lines2
 
-def getFundamentalMatRANSAC(pts1, pts2, tol, num_sample=7, confidence=0.99):
+def make_inlier_map_1_matrix(points1, points2, matrix, tol):
+    inlier = np.zeros(len(points1), dtype=np.float64)
+    for i, (point1, point2) in enumerate(zip(points1, points2)):
+        point1_homo, point2_homo = conv2HomogeneousCor(point1, point2)
+        l1, l2 = get_correspondent_epipolar_lines(point1_homo, point2_homo, matrix)
+        l1 = np.float64(l1)
+        l2 = np.float64(l2)
 
-    best_inlier_num = 0
-    best_inlier = np.zeros(len(pts1))
+        err1 = np.float64(abs(l1 @ point1_homo))
+        err2 = np.float64(abs(l2 @ point2_homo))
+        if err1 <= tol and err2 <= tol:
+            inlier[i] = 1
+
+    return inlier
+
+def choose_best_matrix_of3(matrices, points1, points2, tol):
+    most_inliers = 0
+    best_inlier_map = np.zeros(len(points1))
+    best_f_matrix = None
+    for current_f_matrix in matrices:
+
+        inlier_map = make_inlier_map_1_matrix(points1, points2, current_f_matrix, tol)
+
+        if np.sum(inlier_map) > most_inliers:
+            best_inlier_map = inlier_map
+            most_inliers = np.sum(inlier_map)
+            best_f_matrix = current_f_matrix
+
+    return best_f_matrix, best_inlier_map
+
+def getFundamentalMatRANSAC(points1, points2, tol, num_sample=NUM_POINTS, confidence=0.99):
+
+    most_inliers = 0
+    inlier_map = np.zeros(len(points1))
     tol = np.float64(tol)
+    best_fmat = None
 
     # Iteration is calculated based on the confidence and the asumption that 50% correspondences are inliers
     # and 50% correspondences are outliers.
     iterations = int(np.ceil( np.log10(1 - confidence) / np.log10(1 - np.float_power(0.5, num_sample))))
 
     for _ in tqdm(range(iterations)):
-        sample_ptsA, sample_ptsB = randomSampleCorrPoint(pts1, pts2, num_sample)
+        # sample_ptsA, sample_ptsB = randomSampleCorrPoint(points1, points2)
 
-        f = get_fundamental_matrix(sample_ptsA, sample_ptsB)
+        f, inlier_map = get_fundamental_matrix_opencv(points1, points2, tol)
 
-        inlier = np.zeros(len(pts1), dtype=np.float64)
+        if inlier_map is None:
+            print(f'inlier map is none')
+            inlier_map = make_inlier_map_1_matrix(points1, points2, f, tol)
 
-        for i, (point1, point2) in enumerate(zip(pts1, pts2)):
-
-            point1_homo, point2_homo = conv2HomogeneousCor(point1, point2)
-
-            l1, l2 = get_correspondent_epipolar_lines(point1_homo, point2_homo, f)
-            l1 = np.float64(l1)
-            l2 = np.float64(l2)
-
-            err1 = np.float64(abs(l1 @ point1_homo))
-            err2 = np.float64(abs(l2 @ point2_homo))
-            if err1 <= tol and err2 <= tol:
-                inlier[i] = 1
-
-        if np.sum(inlier) > best_inlier_num:
-            best_inlier = inlier
-            best_inlier_num = np.sum(inlier)
+        if np.sum(inlier_map) > most_inliers:
+            inlier_map = inlier_map
+            most_inliers = np.sum(inlier_map)
             best_fmat = f
 
-    return best_fmat, best_inlier
+    return best_fmat, inlier_map
 
 def draw_epilines(image1, image2, lines, points1_homo, points2_homo):
-    image1_cpy = cv2.cvtColor(cv2.cvtColor(image1, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
-    image2_cpy = cv2.cvtColor(cv2.cvtColor(image2, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
+    # image1_cpy = cv2.cvtColor(cv2.cvtColor(image1, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
+    # image2_cpy = cv2.cvtColor(cv2.cvtColor(image2, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
+    image1_cpy = image1.copy()
+    image2_cpy = image2.copy()
     row, col, cha = image1_cpy.shape
     row -= 1
     col -= 1
@@ -226,18 +275,18 @@ def main():
     draw_keypoints(image1, image2, points1, points2)
     tol = 1
 
-    _, mask_og = getFundamentalMatRANSAC(pts1=points1, pts2=points2, tol=tol, num_sample=7, confidence=0.99)
+    _, mask_og = getFundamentalMatRANSAC(points1=points1, points2=points2, tol=tol, num_sample=NUM_POINTS, confidence=0.99)
 
     inliers1 = points1[mask_og.ravel() == 1]
     inliers2 = points2[mask_og.ravel() == 1]
-    f_reestimated, _ = getFundamentalMatRANSAC(pts1=inliers1, pts2=inliers2, tol=tol, num_sample=7, confidence=0.99)
+    f_reestimated, _ = getFundamentalMatRANSAC(points1=inliers1, points2=inliers2, tol=tol, num_sample=NUM_POINTS, confidence=0.99)
     mask_reestimated = np.zeros(len(points1), dtype=np.float64)
-    for i, (print1, print2) in enumerate(zip(points1, points2)):
-        print1_homo, point2_homo = conv2HomogeneousCor(print1, print2)
-        l1, l2 = get_correspondent_epipolar_lines(print1_homo, point2_homo, f_reestimated)
+    for i, (point1, point2) in enumerate(zip(points1, points2)):
+        point1_homo, point2_homo = conv2HomogeneousCor(point1, point2)
+        l1, l2 = get_correspondent_epipolar_lines(point1_homo, point2_homo, f_reestimated)
         l1 = np.float64(l1)
         l2 = np.float64(l2)
-        error1 = np.float64(abs(l1 @ print1_homo))
+        error1 = np.float64(abs(l1 @ point1_homo))
         error2 = np.float64(abs(l2 @ point2_homo))
         if error1 <= tol and error2 <= tol:
             mask_reestimated[i] = 1
@@ -249,7 +298,7 @@ def main():
     image2_cpy = image2.copy()
 
 
-    sample_inliersA_ree, sample_inliersB_ree = randomSampleCorrPoint(inliers1, inliers2, 7)
+    sample_inliersA_ree, sample_inliersB_ree = randomSampleCorrPoint(inliers1, inliers2)
 
     sample_inliers1_homo_reestimated, sample_inliers2_homo_reestimated = conv2HomogeneousCor(sample_inliersA_ree, sample_inliersB_ree)
 
@@ -271,7 +320,7 @@ def main():
     axis[1].set_title("Drawn on image B")
     axis[1].set_axis_off()
 
-    plt.show()
+    plt.savefig(epiploar_lines_file_path)
 
 if __name__ == '__main__':
     main()
