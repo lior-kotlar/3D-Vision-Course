@@ -1,7 +1,8 @@
 import matplotlib.pyplot as plt
 import csv
 import numpy as np
-import scipy.spatial as sp
+from sklearn.neighbors import NearestNeighbors
+from utils import rotationMatrixToEulerAngles, clean_noise_from_matrix
 
 teapot_file_path = "C:\\Users\\liork\\Documents\\Masters\\master modules\\3D-Vision-Course\\icp\\data\\Teapot.csv"
 
@@ -145,7 +146,7 @@ def translate_points(points):
         np.ones((points.shape[0], 1))
     ])
 
-    tx = 0.25
+    tx = 0.125
     ty = 0.25
     tz = 0.25
 
@@ -175,84 +176,138 @@ def rotate_points(points, angles):
     rotated_points = np.matmul(points, r)
     return rotated_points
 
-def best_fit(A, B):
-    #
-    na = A.shape[1]
-    nb = B.shape[1]
-    #
-    assert na==nb
-    #
-    H = A @ B.T
-    W, S, V = np.linalg.svd(H)
-    #
-    return V.T @ W.T
+def best_fit_transform(A, B):
+    '''
+    Calculates the least-squares best-fit transform that maps corresponding points A to B in m spatial dimensions
+    Input:
+      A: Nxm numpy array of corresponding points
+      B: Nxm numpy array of corresponding points
+    Returns:
+      T: (m+1)x(m+1) homogeneous transformation matrix that maps A on to B
+      R: mxm rotation matrix
+      t: mx1 translation vector
+    '''
 
-def nearest_neighbours(A, B):
-    #
-    na = A.shape[1]
-    nb = B.shape[1]
-    #
-    assert na <= nb
-    #
-    tree = sp.KDTree(A.T, leafsize=10, compact_nodes=True, copy_data=True, balanced_tree=True)
-    #
-    matching = []
-    I = np.eye(na)
-    #
-    for i in range(nb):
-        _, ind = tree.query(B.T[i], k=1, p=2, workers=-1)
-        matching += [I[ind]]
-    #    
-    return np.array(matching)
+    assert A.shape == B.shape
 
-def icp(A, B, init=None, max_iter=100, tol=1e-16):
-    #
-    src = np.copy(A)
-    dst = np.copy(B)
-    #
-    na = src.shape[1]
-    nb = src.shape[1]
-    #
-    assert na <= nb
-    #
-    if (init is not None):
-        src = init @ src
-    #    
-    prev_err = 0
-    #
-    for i in range(max_iter):
-        #   
-        nn = nearest_neighbours(src, dst)
-        U = best_fit(src, dst @ nn)
-        #    
-        src = U @ src
-        #
-        diff = src - dst @ nn
-        err  = np.linalg.norm(diff, 2)
-        #
-        if abs(prev_err - err) < tol:
+    # get number of dimensions
+    m = A.shape[1]
+
+    # translate points to their centroids
+    centroid_A = np.mean(A, axis=0)
+    centroid_B = np.mean(B, axis=0)
+    AA = A - centroid_A
+    BB = B - centroid_B
+
+    # rotation matrix
+    H = np.dot(AA.T, BB)
+    U, S, Vt = np.linalg.svd(H)
+    R = np.dot(Vt.T, U.T)
+
+    # special reflection case
+    if np.linalg.det(R) < 0:
+       Vt[m-1,:] *= -1
+       R = np.dot(Vt.T, U.T)
+
+    # translation
+    t = centroid_B.T - np.dot(R,centroid_A.T)
+
+    # homogeneous transformation
+    T = np.identity(m+1)
+    T[:m, :m] = R
+    T[:m, m] = t
+
+    return T, R, t
+
+def nearest_neighbor(src, dst):
+    '''
+    Find the nearest (Euclidean) neighbor in dst for each point in src
+    Input:
+        src: Nxm array of points
+        dst: Nxm array of points
+    Output:
+        distances: Euclidean distances of the nearest neighbor
+        indices: dst indices of the nearest neighbor
+    '''
+
+    assert src.shape == dst.shape
+
+    neigh = NearestNeighbors(n_neighbors=1)
+    neigh.fit(dst)
+    distances, indices = neigh.kneighbors(src, return_distance=True)
+    return distances.ravel(), indices.ravel()
+
+def icp2(A, B, init_pose=None, max_iterations=50, tolerance=0.0001):
+    '''
+    The Iterative Closest Point method: finds best-fit transform that maps points A on to points B
+    Input:
+        A: Nxm numpy array of source mD points
+        B: Nxm numpy array of destination mD point
+        init_pose: (m+1)x(m+1) homogeneous transformation
+        max_iterations: exit algorithm after max_iterations
+        tolerance: convergence criteria
+    Output:
+        T: final homogeneous transformation that maps A on to B
+        distances: Euclidean distances (errors) of the nearest neighbor
+        i: number of iterations to converge
+    '''
+
+    assert A.shape == B.shape
+
+    # get number of dimensions
+    m = A.shape[1]
+
+    # make points homogeneous, copy them to maintain the originals
+    src = np.ones((m+1,A.shape[0]))
+    dst = np.ones((m+1,B.shape[0]))
+    src[:m,:] = np.copy(A.T)
+    dst[:m,:] = np.copy(B.T)
+
+    # apply the initial pose estimation
+    if init_pose is not None:
+        src = np.dot(init_pose, src)
+
+    prev_error = 0
+
+    for i in range(max_iterations):
+        # find the nearest neighbors between the current source and destination points
+        distances, indices = nearest_neighbor(src[:m,:].T, dst[:m,:].T)
+
+        # compute the transformation between the current source and nearest destination points
+        T,_,_ = best_fit_transform(src[:m,:].T, dst[:m,indices].T)
+
+        # update the current source
+        src = np.dot(T, src)
+
+        # check error
+        mean_error = np.mean(distances)
+        if np.abs(prev_error - mean_error) < tolerance:
             break
-        #    
-        prev_err = err
-    #
-    U = best_fit(A, src)
-    nn = nearest_neighbours(U @ A, dst)
-    #
-    diff = U @ A - B @ nn
-    dist = np.linalg.norm(diff, 2)
-    #
-    return U, nn, dist
+        prev_error = mean_error
 
-if __name__ == "__main__":
+    # calculate final transformation
+    T,_,_ = best_fit_transform(A, src[:m,:].T)
+    T = clean_noise_from_matrix(T)
+    return T, distances, i
+
+def main():
     teapot_points = load_points_csv_file(teapot_file_path)
     transformed_teapot_points = translate_points(teapot_points)
-    x_axis_rotation = np.pi/6
-    y_axis_rotation = np.pi/6
-    z_axis_rotation = np.pi/6
+    same_angle = 0
+    x_axis_rotation = np.pi/4
+    y_axis_rotation = same_angle
+    z_axis_rotation = same_angle
     transformed_teapot_points = rotate_points(transformed_teapot_points, (x_axis_rotation, y_axis_rotation, z_axis_rotation))
     plot_points(teapot_points, transformed_teapot_points)
 
-    u, nn, dist = icp(teapot_points, transformed_teapot_points)
-    print(f'u shape: {u.shape}')
-    print(f'nn shape: {nn.shape}')
-    print(f'dist: {dist}')
+    T, distances, i = icp2(teapot_points, transformed_teapot_points)
+    euler_angles = rotationMatrixToEulerAngles(T[:3,:3])
+
+    print(f'T: {T}')
+    print(f'distances shape: {distances.shape}')
+    print(f'iterations: {i}')
+    print(f'Euler angles (radians): {euler_angles}')
+    print(f'Euler angles (degrees): {np.degrees(euler_angles)}')
+
+if __name__ == "__main__":
+    main()
