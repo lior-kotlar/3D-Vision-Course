@@ -1,41 +1,21 @@
-import itertools
 import matplotlib.pyplot as plt
 import csv
 import numpy as np
 import scipy.spatial as sp
-from sklearn.neighbors import NearestNeighbors
-from utils import rotationMatrixToEulerAngles, clean_noise_from_matrix
-from sympy import Matrix
-from sympy.utilities.iterables import permutations
+from utils import *
+import os
 
 x_translation = 0.25
 y_translation = 0
 z_translation = 0
 TOLERANCE = 1e-10
 MAX_ITER = 100
-teapot_file_path = "C:\\Users\\liork\\Documents\\Masters\\master modules\\3D-Vision-Course\\icp\\data\\Teapot.csv"
+TEAPOT_FILE_PATH = "C:\\Users\\liork\\Documents\\Masters\\master modules\\3D-Vision-Course\\icp\\data\\Teapot.csv"
+COW_FILE_PATH = "C:\\Users\\liork\\Documents\\Masters\\master modules\\3D-Vision-Course\\icp\\data\\Cow.csv"
+BUNNY_FILE_PATH = "C:\\Users\\liork\\Documents\\Masters\\master modules\\3D-Vision-Course\\icp\\data\\Bunny.csv"
+PLOT_SAVE_DIRECTORY = "C:\\Users\\liork\\Documents\\Masters\\master modules\\3D-Vision-Course\\icp\\data\\"
 
-def euler_zyx_to_rotation_matrix(z, y, x):
-    sz = np.sin(z)
-    cz = np.cos(z)
-    sy = np.sin(y)
-    cy = np.cos(y)
-    sx = np.sin(x)
-    cx = np.cos(x)
-
-    a11 = cz * cy
-    a12 = cz * sy * sx - cx * sz
-    a13 = sz * sx + cz * cx * sy
-    a21 = cy * sz
-    a22 = cz * cx + sz * sy * sx
-    a23 = cx * sz * sy - cz * sx
-    a31 = -sy
-    a32 = cy * sx
-    a33 = cy * cx
-
-    R = np.asarray([[a11, a12, a13], [a21, a22, a23], [a31, a32, a33]])
-
-    return R
+POINT_FILE_PATHS = [TEAPOT_FILE_PATH, COW_FILE_PATH, BUNNY_FILE_PATH]
 
 def load_points_csv_file(csv_file_path):
     points = []
@@ -46,27 +26,7 @@ def load_points_csv_file(csv_file_path):
             points.append(point)
     return np.array(points)
 
-def plot_points(points1, points2=None):
-
-    def set_axes_equal(ax):
-        '''Make 3D plot axes have equal scale.'''
-        x_limits = ax.get_xlim3d()
-        y_limits = ax.get_ylim3d()
-        z_limits = ax.get_zlim3d()
-
-        x_range = abs(x_limits[1] - x_limits[0])
-        y_range = abs(y_limits[1] - y_limits[0])
-        z_range = abs(z_limits[1] - z_limits[0])
-
-        max_range = max([x_range, y_range, z_range])
-
-        x_middle = np.mean(x_limits)
-        y_middle = np.mean(y_limits)
-        z_middle = np.mean(z_limits)
-
-        ax.set_xlim3d([x_middle - max_range/2, x_middle + max_range/2])
-        ax.set_ylim3d([y_middle - max_range/2, y_middle + max_range/2])
-        ax.set_zlim3d([z_middle - max_range/2, z_middle + max_range/2])
+def plot_points(points1, title, points2=None, save_plot=False):
 
     color1='blue'
     color2='red'
@@ -84,7 +44,9 @@ def plot_points(points1, points2=None):
         ax.scatter(x2, y2, z2, c=color2)
 
     set_axes_equal(ax)
-
+    if save_plot:
+        file_path = PLOT_SAVE_DIRECTORY + title.replace(" ", "_") + ".png"
+        plt.savefig(file_path)
     plt.show()
 
 def translate_points(points, tx, ty, tz):
@@ -211,24 +173,32 @@ def smart_init_icp(source_point_cloud, dest_point_cloud, threshold = TOLERANCE):
     return clean_noise_from_matrix(T)
 
 def main():
-    teapot_points = load_points_csv_file(teapot_file_path)
+    
+    point_file_path = POINT_FILE_PATHS[1]
+
+    object_name = os.path.splitext(os.path.basename(point_file_path))[0]
+    
+    original_point_cloud = load_points_csv_file(point_file_path)
     
     x_axis_rotation = np.pi/2
     y_axis_rotation = np.pi/4
     z_axis_rotation = 0
-    transformed_teapot_points, r = rotate_points(teapot_points, (x_axis_rotation, y_axis_rotation, z_axis_rotation))
-    np.random.shuffle(transformed_teapot_points)
-    print(f'true rotation matrix:\n{r}')
+    transformed_point_cloud, rotation_matrix = rotate_points(original_point_cloud, (x_axis_rotation, y_axis_rotation, z_axis_rotation))
+    np.random.shuffle(transformed_point_cloud)
+    print(f'true rotation matrix:\n{rotation_matrix}')
     print(f'true euler angles (degrees): {np.degrees((x_axis_rotation, y_axis_rotation, z_axis_rotation))}')
-    plot_points(teapot_points, transformed_teapot_points)
+    plot_points(points1=original_point_cloud, title=f'{object_name} Original and Transformed Points', points2=transformed_point_cloud)
 
-    simple_icp_transformation, _ = simple_icp(teapot_points.T, transformed_teapot_points.T)
+
+    simple_icp_transformation, simple_icp_distance = simple_icp(original_point_cloud.T, transformed_point_cloud.T)
     euler_angles = rotationMatrixToEulerAngles(simple_icp_transformation)
+    simple_icp_rectified_point_cloud = np.dot(transformed_point_cloud, np.linalg.inv(simple_icp_transformation))
+    plot_points(original_point_cloud, title=f'{object_name} Original and Simple ICP Rectified Points', points2=simple_icp_rectified_point_cloud)
 
     print(f'simple icp translation\n{simple_icp_transformation}')
     print(f'simple icp Euler angles (degrees):\n{np.degrees(euler_angles)}')
 
-    smart_init_transformation = smart_init_icp(teapot_points.T, transformed_teapot_points.T)
+    smart_init_transformation = smart_init_icp(original_point_cloud.T, transformed_point_cloud.T)
     if smart_init_transformation is None:
         print("No valid transformation found.")
         exit(0)
@@ -236,8 +206,8 @@ def main():
     print(f'smart init transformation\n{smart_init_transformation}')
     print(f'smart init Euler angles (degrees):\n{np.degrees(euler_angles)}')
     inverse_rotation = np.linalg.inv(smart_init_transformation)
-    rectified_teapot_points = np.dot(transformed_teapot_points, inverse_rotation)
-    plot_points(teapot_points, rectified_teapot_points)
+    rectified_point_cloud = np.dot(transformed_point_cloud, inverse_rotation)
+    plot_points(original_point_cloud, title=f'{object_name} Original and Rectified Points', points2=rectified_point_cloud)
 
 if __name__ == "__main__":
     main()
