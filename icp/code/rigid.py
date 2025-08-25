@@ -173,41 +173,41 @@ def smart_init_icp(source_point_cloud, dest_point_cloud, threshold = TOLERANCE):
     return clean_noise_from_matrix(T)
 
 def main():
-    
-    point_file_path = POINT_FILE_PATHS[1]
 
-    object_name = os.path.splitext(os.path.basename(point_file_path))[0]
-    
-    original_point_cloud = load_points_csv_file(point_file_path)
-    
-    x_axis_rotation = np.pi/2
-    y_axis_rotation = np.pi/4
-    z_axis_rotation = 0
-    transformed_point_cloud, rotation_matrix = rotate_points(original_point_cloud, (x_axis_rotation, y_axis_rotation, z_axis_rotation))
-    np.random.shuffle(transformed_point_cloud)
-    print(f'true rotation matrix:\n{rotation_matrix}')
-    print(f'true euler angles (degrees): {np.degrees((x_axis_rotation, y_axis_rotation, z_axis_rotation))}')
-    plot_points(points1=original_point_cloud, title=f'{object_name} Original and Transformed Points', points2=transformed_point_cloud)
+    for file in POINT_FILE_PATHS:
+        point_file_path = file
 
+        object_name = os.path.splitext(os.path.basename(point_file_path))[0]
+        
+        original_point_cloud = load_points_csv_file(point_file_path)
+        
+        x_axis_rotation = np.pi/2
+        y_axis_rotation = np.pi/4
+        z_axis_rotation = np.pi/6
+        transformed_point_cloud, rotation_matrix = rotate_points(original_point_cloud, (x_axis_rotation, y_axis_rotation, z_axis_rotation))
+        np.random.shuffle(transformed_point_cloud)
+        print(f'true rotation matrix:\n{rotation_matrix}')
+        print(f'true euler angles (degrees): {np.degrees((x_axis_rotation, y_axis_rotation, z_axis_rotation))}')
+        plot_points(points1=original_point_cloud, title=f'{object_name} Original and Transformed Points', points2=transformed_point_cloud, save_plot=True)
 
-    simple_icp_transformation, simple_icp_distance = simple_icp(original_point_cloud.T, transformed_point_cloud.T)
-    euler_angles = rotationMatrixToEulerAngles(simple_icp_transformation)
-    simple_icp_rectified_point_cloud = np.dot(transformed_point_cloud, np.linalg.inv(simple_icp_transformation))
-    plot_points(original_point_cloud, title=f'{object_name} Original and Simple ICP Rectified Points', points2=simple_icp_rectified_point_cloud)
+        simple_icp_transformation, simple_icp_distance = simple_icp(original_point_cloud.T, transformed_point_cloud.T)
+        euler_angles = rotationMatrixToEulerAngles(simple_icp_transformation)
+        simple_icp_rectified_point_cloud = np.dot(transformed_point_cloud, np.linalg.inv(simple_icp_transformation))
+        plot_points(original_point_cloud, title=f'{object_name} Original and Simple ICP Rectified Points', points2=simple_icp_rectified_point_cloud, save_plot=True)
 
-    print(f'simple icp translation\n{simple_icp_transformation}')
-    print(f'simple icp Euler angles (degrees):\n{np.degrees(euler_angles)}')
+        print(f'simple icp translation\n{simple_icp_transformation}')
+        print(f'simple icp Euler angles (degrees):\n{np.degrees(euler_angles)}')
 
-    smart_init_transformation = smart_init_icp(original_point_cloud.T, transformed_point_cloud.T)
-    if smart_init_transformation is None:
-        print("No valid transformation found.")
-        exit(0)
-    euler_angles = rotationMatrixToEulerAngles(smart_init_transformation)
-    print(f'smart init transformation\n{smart_init_transformation}')
-    print(f'smart init Euler angles (degrees):\n{np.degrees(euler_angles)}')
-    inverse_rotation = np.linalg.inv(smart_init_transformation)
-    rectified_point_cloud = np.dot(transformed_point_cloud, inverse_rotation)
-    plot_points(original_point_cloud, title=f'{object_name} Original and Rectified Points', points2=rectified_point_cloud)
+        smart_init_transformation = smart_init_icp(original_point_cloud.T, transformed_point_cloud.T)
+        if smart_init_transformation is None:
+            print("No valid transformation found.")
+            exit(0)
+        euler_angles = rotationMatrixToEulerAngles(smart_init_transformation)
+        print(f'smart init transformation\n{smart_init_transformation}')
+        print(f'smart init Euler angles (degrees):\n{np.degrees(euler_angles)}')
+        inverse_rotation = np.linalg.inv(smart_init_transformation)
+        rectified_point_cloud = np.dot(transformed_point_cloud, inverse_rotation)
+        plot_points(original_point_cloud, title=f'{object_name} Original and Rectified Points', points2=rectified_point_cloud, save_plot=True)
 
 if __name__ == "__main__":
     main()
