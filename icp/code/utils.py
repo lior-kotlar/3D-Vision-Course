@@ -1,7 +1,7 @@
 import numpy as np
 import math
 
-def clean_noise_from_matrix(matrix, threshold=0.00001):
+def clean_noise_from_matrix(matrix, threshold=1e-10):
     cleaned = np.where(np.abs(matrix) < threshold, 0, matrix)
     return cleaned
 
