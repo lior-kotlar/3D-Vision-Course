@@ -17,19 +17,17 @@ class RankComputation():
         self.correspondence_type = correspondence_type
         self.triple_filename = f'{correspondence_type}_triple.json'
         self.correspondence_types = {
-            'lll': [self.get_user_lll_and_save,
-                    self.onclick_lll,
-                    self.compute_rank_lll],
-            'ppp': [self.get_user_ppp_and_save,
-                    self.onclick_ppp,
-                    self.compute_rank_ppp],
-            'ppl': [self.get_user_ppl_and_save,
-                    self.onclick_ppl,
-                    self.compute_rank_ppl]
+            'lll': self.compute_rank_lll,
+            'ppp': self.compute_rank_ppp,
+            'ppl': self.compute_rank_ppl
+        }
+        self.char_to_type = {
+            'l': 'line',
+            'p': 'point'
         }
         self.image_paths = self.get_image_paths()
         self.triple = self.get_points_from_file_if_exists()
-        self.get_user_triple_function, self.onclick_function, self.compute_rank_function = self.configure_correspondence_type(correspondence_type)
+        self.compute_rank_function = self.configure_rank_computation_type(correspondence_type)
 
     def get_points_from_file_if_exists(self):
         triple = []
@@ -53,10 +51,13 @@ class RankComputation():
                                     [-vy, vx, 0]])
             return skew_matrix
     
-    def configure_correspondence_type(self, correspondence_type):
-        attributes = (self.correspondence_types.get(correspondence_type))
-        run_function, onclick_function, rank_computation_function = attributes
-        return run_function, onclick_function, rank_computation_function
+    def configure_rank_computation_type(self, correspondence_type):
+        
+        rank_computation_function = self.correspondence_types.get(correspondence_type)
+        if rank_computation_function is None:
+            print(f"Error: Unknown correspondence type '{correspondence_type}'.")
+            sys.exit(1)
+        return rank_computation_function
 
     def compute_rank_lll(self):
         l = self.triple[0].flatten()
@@ -98,7 +99,7 @@ class RankComputation():
         x, x_prime, l_double_prime = self.triple
         x1, x2, x3 = x.flatten()
     
-    # 2. Create the known 3x3 matrix L
+        # 2. Create the known 3x3 matrix L
         L = self.v_to_skew(x_prime)
         
         # 3. Create the 3x9 matrix R = (l''^T ⊗ I_3)
@@ -115,7 +116,8 @@ class RankComputation():
 
     def run(self):
         if len(self.triple) == 0:
-            self.get_user_triple_function()
+            self.get_triple_from_user()
+            self.save_triple_to_file()
         if len(self.triple) == 3:
             rank = self.compute_rank_function()
             print(f"\nComputed rank of the matrix: {rank}")
@@ -138,122 +140,7 @@ class RankComputation():
         except IOError as e:
             print(f"Error saving file: {e}")
 
-    # def save_points_to_file(self):
-    #     """Saves the calculated points to a JSON file."""
-    #     filename = 'ppp.json'
-    #     output_path = os.path.join(self.data_directory, filename)
-    #     print(f"\nSaving 3 points to {filename}...")
-    #     try:
-    #         with open(output_path, 'w') as f:
-    #             json.dump({
-    #                 "p": list(self.triple[0].tolist()),
-    #                 "p_prime": list(self.triple[1].tolist()),
-    #                 "p_double_prime": list(self.triple[2].tolist())
-    #             }, f)
-    #         print("File saved successfully.")
-    #     except IOError as e:
-    #         print(f"Error saving file: {e}")
-
-    def onclick_lll(self, event, plot_state):
-        """
-        Main event handler for mouse clicks.
-        'plot_state' is a dictionary containing state for *this plot only*.
-        """
-        # Unpack the state for this specific plot
-        fig = plot_state["fig"]
-        ax = plot_state["ax"]
-        line_name = plot_state["line_name"]
-        cid = plot_state["cid"]
-
-        # Ignore clicks outside the plot axes
-        if not event.inaxes:
-            return
-
-        # Get click coordinates
-        x, y = event.xdata, event.ydata
-        
-        # Add click as a homogeneous point
-        p_homogeneous = np.array([x, y, 1.0])
-        plot_state["points"].append(p_homogeneous)
-        
-        # print(f"  Point {len(plot_state['points'])} clicked at: ({x:.2f}, {y:.2f})")
-        
-        # Plot a marker at the click location
-        ax.plot(x, y, 'rx', markersize=8)
-
-        if len(plot_state["points"]) == 1:
-            # Only one point clicked so far
-            ax.set_title(f"Click point 2 for line '{line_name}'")
-        
-        elif len(plot_state["points"]) == 2:
-            # This is the second click, we can define the line
-            p1 = plot_state["points"][0]
-            p2 = plot_state["points"][1]
-            
-            # Calculate the line using the cross product
-            line_eq = np.cross(p1, p2)
-            
-            # Normalize the line equation
-            norm_factor = np.sqrt(line_eq[0]**2 + line_eq[1]**2)
-            if norm_factor > 1e-6:
-                line_eq = line_eq / norm_factor
-            
-            # print(f"  Line '{line_name}' calculated: {line_eq}")
-            
-            # Add the result to our *global* list
-            self.triple.append(line_eq)
-                        
-            # Update title
-            ax.set_title(f"Line '{line_name}' defined. Close this window to continue.")
-            
-            # We are done with this plot. Disconnect the event handler
-            # and close the window.
-            fig.canvas.mpl_disconnect(cid)
-            plt.close(fig) # This un-blocks the 'plt.show()' call in main()
-        
-        # Redraw the plot
-        fig.canvas.draw()
-
-    def onclick_ppp(self, event, plot_state):
-        """
-        Main event handler for mouse clicks.
-        'plot_state' is a dictionary containing state for *this plot only*.
-        """
-        # Unpack the state for this specific plot
-        fig = plot_state["fig"]
-        ax = plot_state["ax"]
-        point_name = plot_state["point_name"]
-        cid = plot_state["cid"]
-
-        # Ignore clicks outside the plot axes
-        if not event.inaxes:
-            return
-
-        # --- This is the first and only click ---
-        
-        # Get click coordinates
-        x, y = event.xdata, event.ydata
-        
-        # Create homogeneous point
-        p_homogeneous = np.array([x, y, 1.0], dtype=np.int32)
-        
-        print(f"  Point '{point_name}' clicked at: ({x:.2f}, {y:.2f})")
-        
-        # Add the result to our *global* list
-        self.triple.append(p_homogeneous)
-            
-        # Update title
-        ax.set_title(f"Point '{point_name}' defined. Close this window to continue.")
-        
-        # We are done with this plot. Disconnect the event handler
-        # and close the window.
-        fig.canvas.mpl_disconnect(cid)
-        plt.close(fig) # This un-blocks the 'plt.show()' call in main()
-        
-        # Redraw the plot (briefly, before it closes)
-        fig.canvas.draw()
-
-    def onclick_ppl(self, event, plot_state):
+    def onclick(self, event, plot_state):
         """
         Main event handler for mouse clicks.
         Handles both single-click (for points) and double-click (for lines) logic.
@@ -330,114 +217,18 @@ class RankComputation():
             exit()
         return image_paths
 
-    def get_lll_from_user(self):
-        global fig, ax
+    def get_triple_from_user(self):
         
-        for line_name, image_path in zip(line_names, self.image_paths):
-            try:
-                image = plt.imread(image_path)
-            except FileNotFoundError:
-                print(f"Error: Image file not found at '{image_path}'")
-                sys.exit(1)
-            except Exception as e:
-                print(f"Error loading image: {e}")
-                sys.exit(1)
-            image_name = os.path.basename(image_path)
-            print(f"\nProcessing line '{line_name}' from image '{image_name}'...")
-            # 3. Create the plot
-            fig, ax = plt.subplots(figsize=(10, 8))
-            ax.imshow(image)
-            ax.set_aspect('equal')
-            ax.set_title(f"Click point 1 for line '{line_name}'")
-            ax.set_xlabel("Click 2 points to define the line. Do not zoom or pan.")
-            
-            # 4. Create a state dictionary for this plot
-            # This avoids complex globals and keeps each plot's state separate.
-            plot_state = {
-                "points": [],
-                "line_name": line_name,
-                "fig": fig,
-                "ax": ax,
-                "cid": None # Will store the connection ID
-            }
-
-            # 5. Connect the click event handler
-            # We use a lambda function to pass our 'plot_state' to the handler
-            cid = fig.canvas.mpl_connect(
-                'button_press_event',
-                lambda event: self.onclick_function(event, plot_state)
-            )
-            plot_state["cid"] = cid # Store the ID so we can disconnect it later
-
-            # 6. Show the plot.
-            # This call is BLOCKING. The script will pause here until
-            # 'plt.close(fig)' is called (inside our onclick handler).
-            plt.show() 
-            
-            print(f"Finished processing line '{line_name}'.")
-        
-    def get_user_lll_and_save(self):
-        self.get_lll_from_user()
-        self.save_triple_to_file()
-
-    def get_ppp_from_user(self):
-        global fig, ax
-        
-        for point_name, image_path in zip(point_names, self.image_paths):
-            try:
-                image = plt.imread(image_path)
-            except FileNotFoundError:
-                print(f"Error: Image file not found at '{image_path}'")
-                sys.exit(1)
-            except Exception as e:
-                print(f"Error loading image: {e}")
-                sys.exit(1)
-            image_name = os.path.basename(image_path)
-            print(f"\nProcessing point '{point_name}' from image '{image_name}'...")
-            # 3. Create the plot
-            fig, ax = plt.subplots(figsize=(10, 8))
-            ax.imshow(image)
-            ax.set_aspect('equal')
-            ax.set_title(f"Click point 1 for point '{point_name}'")
-            
-            # 4. Create a state dictionary for this plot
-            # This avoids complex globals and keeps each plot's state separate.
-            plot_state = {
-                "points": [],
-                "point_name": point_name,
-                "fig": fig,
-                "ax": ax,
-                "cid": None # Will store the connection ID
-            }
-
-            # 5. Connect the click event handler
-            # We use a lambda function to pass our 'plot_state' to the handler
-            cid = fig.canvas.mpl_connect(
-                'button_press_event',
-                lambda event: self.onclick_function(event, plot_state)
-            )
-            plot_state["cid"] = cid # Store the ID so we can disconnect it later
-
-            # 6. Show the plot.
-            # This call is BLOCKING. The script will pause here until
-            # 'plt.close(fig)' is called (inside our onclick handler).
-            plt.show() 
-
-            print(f"Finished processing point '{point_name}'.")
-
-    def get_user_ppp_and_save(self):
-        self.get_ppp_from_user()
-        self.save_triple_to_file()
-
-    def get_ppl_from_user(self):
         items_to_collect = [
-            ('point', 'p'),         # Item 1: point 'p'
-            ('point', 'p_prime'),    # Item 2: point 'p_prime'
-            ('line',  'l_double_prime') # Item 3: line 'l_double_prime'
+            (self.char_to_type[self.correspondence_type[0]], self.correspondence_type[0]),
+            (self.char_to_type[self.correspondence_type[1]], f'{self.correspondence_type[1]}_prime'),
+            (self.char_to_type[self.correspondence_type[2]], f'{self.correspondence_type[2]}_double_prime')
         ]
         
+        msg = f'{self.char_to_type[self.correspondence_type[0]]}-{self.char_to_type[self.correspondence_type[1]]}-' + \
+              f'{self.char_to_type[self.correspondence_type[2]]} Correspondence Selector'
 
-        print("--- Point-Point-Line Correspondence Selector ---")
+        print(msg)
 
         # 2. Loop through each image and collect the required data
         for i, (item_type, item_name) in enumerate(items_to_collect):
@@ -480,7 +271,7 @@ class RankComputation():
             # 5. Connect the click event handler
             cid = fig.canvas.mpl_connect(
                 'button_press_event',
-                lambda event: self.onclick_ppl(event, plot_state)
+                lambda event: self.onclick(event, plot_state)
             )
             plot_state["cid"] = cid 
 
@@ -488,10 +279,6 @@ class RankComputation():
             plt.show() 
             
             print(f"Finished processing {item_type} '{item_name}'.")
-
-    def get_user_ppl_and_save(self):
-        self.get_ppl_from_user()
-        self.save_triple_to_file()
 
 def main():
     if len(sys.argv) < 3:
