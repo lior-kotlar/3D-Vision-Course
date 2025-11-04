@@ -1,3 +1,4 @@
+import sys
 import matplotlib.pyplot as plt
 import csv
 import numpy as np
@@ -12,10 +13,16 @@ y_translation = 0
 z_translation = 0
 TOLERANCE = 1e-10
 MAX_ITER = 100
-TEAPOT_FILE_PATH = "C:\\Users\\liork\\Documents\\Masters\\master modules\\3D-Vision-Course\\icp\\data\\Teapot.csv"
-COW_FILE_PATH = "C:\\Users\\liork\\Documents\\Masters\\master modules\\3D-Vision-Course\\icp\\data\\Cow.csv"
-BUNNY_FILE_PATH = "C:\\Users\\liork\\Documents\\Masters\\master modules\\3D-Vision-Course\\icp\\data\\Bunny.csv"
-PLOT_SAVE_DIRECTORY = "C:\\Users\\liork\\Documents\\Masters\\master modules\\3D-Vision-Course\\icp\\data\\"
+TEAPOT_FILE_PATH = os.path.abspath("icp/data/Teapot.csv")
+COW_FILE_PATH = os.path.abspath("icp/data/Cow.csv")
+BUNNY_FILE_PATH = os.path.abspath("icp/data/Bunny.csv")
+PLOT_SAVE_DIRECTORY = os.path.abspath("icp/data/")
+DEBUGGING_ORIGINAL_CLOUD_FILE_PATH = os.path.abspath("icp/data/debugging_data/original_cloud.npy")
+DEBUGGING_TARGET_CLOUD_FILE_PATH = os.path.abspath("icp/data/debugging_data/target_cloud.npy")
+DEBUGGING_TRANSFORMATION_FILE_PATH = os.path.abspath("icp/data/debugging_data/transformation.npy")
+
+arg = None if len(sys.argv) < 2 else sys.argv[1]
+debug = False if arg is None else bool(arg == "d")
 
 POINT_FILE_PATHS = [TEAPOT_FILE_PATH, COW_FILE_PATH, BUNNY_FILE_PATH]
 
@@ -163,7 +170,7 @@ def calculate_error(source, destination, correspondence_map):
     diff = source - destination @ correspondence_map
     return np.linalg.norm(diff, 2)
 
-def simple_icp(src, dst, initial_guess=None):
+def simple_icp_old(src, dst, initial_guess=None):
     '''
     expects 3XN numpy arrays as input
     '''
@@ -192,7 +199,7 @@ def simple_icp(src, dst, initial_guess=None):
     transformation_distance = calculate_error(current_transformation_matrix @ src, dst, correspondence_map)
     return current_transformation_matrix, transformation_distance
 
-def simple_icp2(src, dst, max_iterations=50, tolerance=0.000001, initial_guess=None):
+def simple_icp_new(src, dst, max_iterations=50, tolerance=0.000001, initial_guess=None):
     source_point_cloud = np.copy(src)
     original_source_point_cloud = np.copy(src)
     destination_point_cloud = np.copy(dst)
@@ -270,7 +277,7 @@ def rotation_matrix_and_translation_vector_to_homogeneous_matrix(R, t=None):
     homogeneous_matrix[:m, m] = t.flatten()
     return homogeneous_matrix
 
-def smart_init_icp(source_point_cloud, dest_point_cloud, threshold = TOLERANCE):
+def smart_init_icp_old(source_point_cloud, dest_point_cloud, threshold = TOLERANCE):
     
     dim = source_point_cloud.shape[0]
 
@@ -288,7 +295,7 @@ def smart_init_icp(source_point_cloud, dest_point_cloud, threshold = TOLERANCE):
     for i, isom in enumerate(isoms_discrete):
         U = u_0 @ u_p @ isom @ u_p.T
         print(f'initial guess:\n{U}')
-        transformation_found, d = simple_icp(src, dest, U)
+        transformation_found, d = simple_icp_old(src, dest, U)
         if d < threshold:
             T = transformation_found.T
             # print("Orthogonal transformation found:")
@@ -304,7 +311,7 @@ def smart_init_icp(source_point_cloud, dest_point_cloud, threshold = TOLERANCE):
             # print(f'isomer found is\n{isom}')
     return clean_noise_from_matrix(T)
 
-def smart_init_icp2(source_point_cloud, dest_point_cloud, error_threshold=1e-5, threshold = TOLERANCE):
+def smart_init_icp_new(source_point_cloud, dest_point_cloud, error_threshold=1e-5, threshold = TOLERANCE):
     
     dim = source_point_cloud.shape[1]
 
@@ -323,10 +330,10 @@ def smart_init_icp2(source_point_cloud, dest_point_cloud, error_threshold=1e-5, 
     T1 = None
     for i, isom in enumerate(isoms_discrete):
         U = u_0 @ u_p @ isom @ u_p.T
-        transformation_found, d = simple_icp(src_centered.T, dest_centered.T, U)
+        transformation_found, d = simple_icp_old(src_centered.T, dest_centered.T, U)
         initial_guess = rotation_matrix_and_translation_vector_to_homogeneous_matrix(U)
         print(f'initial guess2:\n{U}')
-        T_final, intermediate_point_clouds, history_error, iters = simple_icp2(src_centered, dest_centered, initial_guess=initial_guess)
+        T_final, intermediate_point_clouds, history_error, iters = simple_icp_new(src_centered, dest_centered, initial_guess=initial_guess)
         error = history_error[-1]
         if error < error_threshold:
             T1 = T_final
@@ -393,14 +400,16 @@ def create_destination_point_cloud(original_point_cloud):
     print(f'true rotation matrix:\n{rotation_matrix}')
     print(f'true translation vector:\n{translation_vector}')
 
-    return destination_point_cloud, rotation_matrix, translation_vector
+    transformation_matrix = rotation_matrix_and_translation_vector_to_homogeneous_matrix(rotation_matrix, translation_vector.T)
+
+    return destination_point_cloud, transformation_matrix
 
 def simple_icp_main(original_point_cloud, target_point_cloud=None):
 
     if target_point_cloud is None:
         target_point_cloud, true_rotation_matrix, true_translation_vector = create_destination_point_cloud(original_point_cloud)
 
-    T_final, intermediate_point_clouds, history_error, iters = simple_icp2(original_point_cloud, target_point_cloud, initial_guess=None)
+    T_final, intermediate_point_clouds, history_error, iters = simple_icp_new(original_point_cloud, target_point_cloud, initial_guess=None)
 
     print(f'Converged/Stopped after {iters} iterations.')
     print(f'Final Mean Error: {history_error[-1]:.4f}')
@@ -455,11 +464,36 @@ def simple_icp_main(original_point_cloud, target_point_cloud=None):
     plt.axis('equal')
     plt.show()
 
+def get_target_point_cloud_and_true_transformation(original_point_cloud):
+    if debug:
+        if os.path.exists(DEBUGGING_TARGET_CLOUD_FILE_PATH):
+            target_point_cloud = load_array_from_file(DEBUGGING_TARGET_CLOUD_FILE_PATH)
+            if os.path.exists(DEBUGGING_TRANSFORMATION_FILE_PATH):
+                true_transformation = load_array_from_file(DEBUGGING_TRANSFORMATION_FILE_PATH)
+                return target_point_cloud, true_transformation
+            else:
+                print("Debugging transformation file not found. Creating new target cloud.")
+        print("Debugging target cloud file not found. Creating new target cloud.")
+    target_point_cloud, true_transformation = create_destination_point_cloud(original_point_cloud)
+    save_array_to_file(target_point_cloud, DEBUGGING_TARGET_CLOUD_FILE_PATH)
+    save_array_to_file(true_transformation, DEBUGGING_TRANSFORMATION_FILE_PATH)
+    return target_point_cloud, true_transformation
+
+
+
 def smart_icp_main(original_point_cloud):
-    target_point_cloud, true_rotation_matrix, true_translation_vector = create_destination_point_cloud(original_point_cloud)
-    simple_icp_main(original_point_cloud, target_point_cloud)
-    T_final, intermediate_point_clouds, history_error, iters = simple_icp2(original_point_cloud, target_point_cloud, initial_guess=None)
-    smart_init_transformation = smart_init_icp2(original_point_cloud, target_point_cloud)
+    target_point_cloud, true_transformation = get_target_point_cloud_and_true_transformation(original_point_cloud)
+    smart_init_transformation = smart_init_icp_new(original_point_cloud, target_point_cloud)
+
+def get_original_point_cloud(point_file_path):
+    if debug:
+        if os.path.exists(DEBUGGING_ORIGINAL_CLOUD_FILE_PATH):
+            original_point_cloud = load_array_from_file(DEBUGGING_ORIGINAL_CLOUD_FILE_PATH)
+            return original_point_cloud
+        print("Debugging original cloud file not found. Loading from file.")
+    original_point_cloud = load_points_csv_file(point_file_path)
+    save_array_to_file(original_point_cloud, DEBUGGING_ORIGINAL_CLOUD_FILE_PATH)
+    return original_point_cloud
 
 def main():
 
@@ -467,7 +501,7 @@ def main():
         point_file_path = file
 
         object_name = os.path.splitext(os.path.basename(point_file_path))[0]
-        original_point_cloud = load_points_csv_file(point_file_path)
+        original_point_cloud = get_original_point_cloud(point_file_path)
         
         smart_icp_main(original_point_cloud)
         return
@@ -483,11 +517,11 @@ def main():
 
         
 
-        simple_icp_transformation, simple_icp_distance = simple_icp(original_point_cloud.T, target_point_cloud.T)
+        simple_icp_transformation, simple_icp_distance = simple_icp_old(original_point_cloud.T, target_point_cloud.T)
         
         from_transformation_to_plot(simple_icp_transformation, original_point_cloud, target_point_cloud, object_name)
 
-        smart_init_transformation = smart_init_icp(original_point_cloud.T, target_point_cloud.T)
+        smart_init_transformation = smart_init_icp_old(original_point_cloud.T, target_point_cloud.T)
         if smart_init_transformation is None:
             print("No valid transformation found.")
             exit(0)

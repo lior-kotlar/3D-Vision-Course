@@ -72,3 +72,22 @@ def set_axes_equal(ax):
         ax.set_xlim3d([x_middle - max_range/2, x_middle + max_range/2])
         ax.set_ylim3d([y_middle - max_range/2, y_middle + max_range/2])
         ax.set_zlim3d([z_middle - max_range/2, z_middle + max_range/2])
+
+def save_array_to_file(array, file_path):
+    if not isinstance(array, np.ndarray):
+        print("Input is not a numpy array. type:", type(array))
+        return
+    try:
+        np.save(file_path, array)
+        print(f'successfully saved array of shape {array.shape} to {file_path}')
+    except Exception as e:
+        print(f'Error saving array to {file_path}: {e}')
+
+def load_array_from_file(file_path):
+    try:
+        loaded_array = np.load(file_path)
+        print(f'successfully loaded array of shape {loaded_array.shape} from {file_path}')
+        return loaded_array
+    except Exception as e:
+        print(f'Error loading array from {file_path}: {e}')
+        return None
