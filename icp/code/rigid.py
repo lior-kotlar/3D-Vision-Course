@@ -1,3 +1,4 @@
+import itertools
 import matplotlib.pyplot as plt
 import csv
 import numpy as np
@@ -105,7 +106,7 @@ def clouds_centroids(source_point_cloud, destination_point_cloud):
     translation_vector = centroid_B - centroid_A
     return centered_source, centered_destination, translation_vector
 
-def best_fit_transform(A, B):
+def best_fit_transform(cloud_a, cloud_b):
     """
     Calculates the best-fit transform that maps points A onto points B.
     Input:
@@ -114,23 +115,23 @@ def best_fit_transform(A, B):
     Output:
         T: (dim+1)x(dim+1) homogeneous transformation matrix
     """
-    assert A.shape == B.shape
-    dim = A.shape[1]
-    centroid_A = np.mean(A, axis=0)
-    centroid_B = np.mean(B, axis=0)
-    AA = A - centroid_A
-    BB = B - centroid_B
-    H = np.dot(AA.T, BB)
-    U, S, Vt = np.linalg.svd(H)
+    assert cloud_a.shape == cloud_b.shape
+    dim = cloud_a.shape[1]
+    centroid_a = np.mean(cloud_a, axis=0)
+    centroid_b = np.mean(cloud_b, axis=0)
+    cloud_a_centered = cloud_a - centroid_a
+    cloud_b_centered = cloud_b - centroid_b
+    H = np.dot(cloud_a_centered.T, cloud_b_centered)
+    U, _, Vt = np.linalg.svd(H)
     R = np.dot(Vt.T, U.T)
     if np.linalg.det(R) < 0:
        Vt[dim-1,:] *= -1
        R = np.dot(Vt.T, U.T)
-    t = centroid_B.reshape(-1,1) - np.dot(R, centroid_A.reshape(-1,1))
-    T = np.eye(dim+1)
-    T[:dim, :dim] = R
-    T[:dim, -1] = t.ravel()
-    return T
+    t = centroid_b.reshape(-1,1) - np.dot(R, centroid_a.reshape(-1,1))
+    best_transform = np.eye(dim+1)
+    best_transform[:dim, :dim] = R
+    best_transform[:dim, -1] = t.ravel()
+    return best_transform
 
 def create_point_correspondence(source_point_cloud, destination_point_cloud):
     #
@@ -247,7 +248,7 @@ def simple_icp2(src, dst, max_iterations=50, tolerance=0.000001, initial_guess=N
  
     return T_final, intermediate_point_clouds, intermediate_errors, i + 1
 
-def reflection_generators(d):
+def reflection_generator(d):
     i = np.eye(d)
     reflection_group = [i]
     for diag_pos in range(d):
@@ -255,6 +256,14 @@ def reflection_generators(d):
         mat[diag_pos, diag_pos] = -1
         reflection_group.append(mat)
     return reflection_group
+
+def reflection_generator2(d):
+    all_reflections = []
+    diagonal_combinations = itertools.product([1, -1], repeat=d)
+    for combination in diagonal_combinations:
+        reflection_matrix = np.diag(combination)
+        all_reflections.append(reflection_matrix)
+    return all_reflections
 
 def rotation_matrix_and_translation_vector_to_homogeneous_matrix(R, t=None):
     '''
@@ -283,7 +292,7 @@ def smart_init_icp(source_point_cloud, dest_point_cloud, threshold = TOLERANCE):
     _, u_q = np.linalg.eigh(e_p)
     u_0 = u_q @ u_p.T
     
-    isoms_discrete = reflection_generators(dim)
+    isoms_discrete = reflection_generator(dim)
     T = None
     for i, isom in enumerate(isoms_discrete):
         U = u_0 @ u_p @ isom @ u_p.T
@@ -318,20 +327,23 @@ def smart_init_icp2(source_point_cloud, dest_point_cloud, error_threshold=1e-5, 
     _, u_q = np.linalg.eigh(e_p)
     u_0 = u_q @ u_p.T
     
-    isoms_discrete = reflection_generators(dim)
+    isoms_discrete = reflection_generator2(dim)
     T = None
-    T1 = None
+    best_t = None
     for i, isom in enumerate(isoms_discrete):
         U = u_0 @ u_p @ isom @ u_p.T
-        transformation_found, d = simple_icp(src_centered.T, dest_centered.T, U)
+        # transformation_found, d = simple_icp(src_centered.T, dest_centered.T, U)
         initial_guess = rotation_matrix_and_translation_vector_to_homogeneous_matrix(U)
         print(f'initial guess2:\n{U}')
         T_final, intermediate_point_clouds, history_error, iters = simple_icp2(src_centered, dest_centered, initial_guess=initial_guess)
         error = history_error[-1]
         if error < error_threshold:
-            T1 = T_final
-        if d < threshold:
-            T = transformation_found.T
+            best_t = T_final
+            best_intermediate_point_clouds = intermediate_point_clouds
+            best_history_error = history_error
+            best_iters = iters        
+        # if d < threshold:
+        #     T = transformation_found.T
             # print("Orthogonal transformation found:")
             # print(clean_noise_from_matrix(T))
             # euler_angles = rotationMatrixToEulerAngles(T)
@@ -343,7 +355,7 @@ def smart_init_icp2(source_point_cloud, dest_point_cloud, error_threshold=1e-5, 
             # print("Distance to image:")
             # print(d)
             # print(f'isomer found is\n{isom}')
-    return clean_noise_from_matrix(T)
+    return clean_noise_from_matrix(best_t), best_intermediate_point_clouds, best_history_error, best_iters
 
 def from_transformation_to_plot(simple_icp_transformation, original_point_cloud, transformed_point_cloud, object_name):
     euler_angles = rotationMatrixToEulerAngles(simple_icp_transformation)
@@ -355,9 +367,9 @@ def from_transformation_to_plot(simple_icp_transformation, original_point_cloud,
 
 def create_destination_point_cloud(original_point_cloud):
     N_POINTS = original_point_cloud.shape[0]
-    theta_x = np.radians(15)
-    theta_y = np.radians(15)
-    theta_z = np.radians(0)
+    theta_x = np.radians(20)
+    theta_y = np.radians(41)
+    theta_z = np.radians(30)
 
     cx, sx = np.cos(theta_x), np.sin(theta_x)
     cy, sy = np.cos(theta_y), np.sin(theta_y)
@@ -383,7 +395,7 @@ def create_destination_point_cloud(original_point_cloud):
 
     rotation_matrix = Rz @ Ry @ Rx 
 
-    translation_vector = np.array([[0, 0, 0.6]])
+    translation_vector = np.array([[0.3, 0.2, 0.6]])
 
     np.random.seed(42)
     randomness = 0 * np.random.rand(N_POINTS, 3)
@@ -394,6 +406,55 @@ def create_destination_point_cloud(original_point_cloud):
     print(f'true translation vector:\n{translation_vector}')
 
     return destination_point_cloud, rotation_matrix, translation_vector
+
+def display(target_point_cloud, intermediate_point_clouds, history_error, iters):
+    fig, ax = plt.subplots()
+ 
+    ax.scatter(target_point_cloud[:, 0], target_point_cloud[:, 1], color='blue', label='Target B', marker='x')
+    
+    scatter_A = ax.scatter(intermediate_point_clouds[0][:, 0], intermediate_point_clouds[0][:, 1], color='red', label='Source A (moving)')
+    title = ax.set_title(f'Iteration 0, Mean Error: N/A')
+    ax.legend()
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.grid(True)
+    ax.axis('equal')
+    
+    all_points = np.vstack([target_point_cloud] + intermediate_point_clouds)
+    min_vals = np.min(all_points, axis=0)
+    max_vals = np.max(all_points, axis=0)
+    range_vals = max_vals - min_vals
+    margin = 0.1 * range_vals # Add 10% margin
+    ax.set_xlim(min_vals[0] - margin[0], max_vals[0] + margin[0])
+    ax.set_ylim(min_vals[1] - margin[1], max_vals[1] + margin[1])
+    
+    # Animation update function
+    def update(frame):
+        # Update source points position
+        scatter_A.set_offsets(intermediate_point_clouds[frame])
+        # Update title
+        error_str = f"{history_error[frame-1]:.4f}" if frame > 0 else "N/A" # Error calculated *after* step
+        title.set_text(f'Iteration {frame}, Mean Error: {error_str}')
+        # Return the artists that were modified
+        return scatter_A, title,
+    
+    # Create the animation
+    # Number of frames is number of states stored (initial + iterations)
+    # Interval is milliseconds between frames (e.g., 500ms = 0.5s)
+    ani = animation.FuncAnimation(fig, update, frames=len(intermediate_point_clouds), 
+                                interval=500, blit=True, repeat=False)
+    
+    # Display the final plot (optional, animation already shows it)
+    plt.figure()
+    plt.scatter(intermediate_point_clouds[-1][:, 0], intermediate_point_clouds[-1][:, 1], color='red', label='Final A')
+    plt.scatter(target_point_cloud[:, 0], target_point_cloud[:, 1], color='blue', label='Target B', marker='x')
+    plt.legend()
+    plt.title(f"Final Alignment after {iters} iterations")
+    plt.xlabel("X")
+    plt.ylabel("Y")
+    plt.grid(True)
+    plt.axis('equal')
+    plt.show()
 
 def simple_icp_main(original_point_cloud, target_point_cloud=None):
 
@@ -457,9 +518,11 @@ def simple_icp_main(original_point_cloud, target_point_cloud=None):
 
 def smart_icp_main(original_point_cloud):
     target_point_cloud, true_rotation_matrix, true_translation_vector = create_destination_point_cloud(original_point_cloud)
-    simple_icp_main(original_point_cloud, target_point_cloud)
-    T_final, intermediate_point_clouds, history_error, iters = simple_icp2(original_point_cloud, target_point_cloud, initial_guess=None)
-    smart_init_transformation = smart_init_icp2(original_point_cloud, target_point_cloud)
+    smart_init_transformation, \
+    best_intermediate_point_clouds, \
+    best_history_error, \
+    best_iters = smart_init_icp2(original_point_cloud, target_point_cloud)
+    display(target_point_cloud, best_intermediate_point_clouds, best_history_error, best_iters)
 
 def main():
 
