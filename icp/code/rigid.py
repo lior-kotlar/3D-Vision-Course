@@ -13,10 +13,10 @@ y_translation = 0
 z_translation = 0
 TOLERANCE = 1e-10
 MAX_ITER = 100
-TEAPOT_FILE_PATH = "C:\\Users\\liork\\Documents\\Masters\\master modules\\3D-Vision-Course\\icp\\data\\Teapot.csv"
-COW_FILE_PATH = "C:\\Users\\liork\\Documents\\Masters\\master modules\\3D-Vision-Course\\icp\\data\\Cow.csv"
-BUNNY_FILE_PATH = "C:\\Users\\liork\\Documents\\Masters\\master modules\\3D-Vision-Course\\icp\\data\\Bunny.csv"
-PLOT_SAVE_DIRECTORY = "C:\\Users\\liork\\Documents\\Masters\\master modules\\3D-Vision-Course\\icp\\data\\"
+TEAPOT_FILE_PATH = os.path.abspath("icp\\data\\Teapot.csv")
+COW_FILE_PATH = os.path.abspath("icp\\data\\Cow.csv")
+BUNNY_FILE_PATH = os.path.abspath("icp\\data\\Bunny.csv")
+PLOT_SAVE_DIRECTORY = os.path.abspath("icp\\data\\")
 
 POINT_FILE_PATHS = [TEAPOT_FILE_PATH, COW_FILE_PATH, BUNNY_FILE_PATH]
 
